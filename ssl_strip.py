@@ -4,6 +4,7 @@ import threading
 import subprocess
 from rules import enable_ip_forwarding, redirect_http_traffic, flush_rules
 from full_http import read_full_http_request, read_full_http_response
+from body_response import decompress_body_using_content_encoding, decode_body_using_content_type_charset, compress_body_using_content_encoding, encode_body_using_content_type_charset
 
 REMOVED_REQUEST_HEADERS = [
     b"connection",
@@ -90,6 +91,21 @@ def handle_client(client_sock: socket.socket):
         # Get full response
         response_first_line, response_headers_dict, response_body = read_full_http_response(upstream)
 
+        # Modify, decompress and decode the response_body only on text-based content types
+        content_type = response_headers_dict.get(b"content-type", b"").lower()
+        if content_type.startswith(b"text/") or b"json" in content_type:
+            response_body = decompress_body_using_content_encoding(response_body, response_headers_dict)
+            response_body = decode_body_using_content_type_charset(response_body, response_headers_dict)
+
+            # Replace all "https://" instances with "http://" in the response_body
+            response_body = response_body.replace("https://", "http://")
+
+            # Re-encode the response_body
+            response_body = encode_body_using_content_type_charset(response_body, response_headers_dict)
+            
+            # Re-compress the response_body
+            response_body = compress_body_using_content_encoding(response_body, response_headers_dict)
+
         # Rebuild response
         headers_lines = [response_first_line]
         for k, v in response_headers_dict.items():
@@ -114,7 +130,7 @@ def handle_client(client_sock: socket.socket):
         out_response = new_response_headers + b"\r\n\r\n" + response_body
 
         print("======== FULL HTTP RESPONSE (raw) ========")
-        preview = out_response[:800]
+        preview = out_response[:200]
         print(preview.decode("iso-8859-1", errors="replace"))
         if len(out_response) > len(preview):
             print(f"\n... [truncated preview: total {len(out_response)} bytes] ...")
