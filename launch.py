@@ -5,13 +5,13 @@ from rules import flush_rules
 
 def parse_args():
     p = argparse.ArgumentParser(description="Launch Script", add_help=False)
-    p.add_argument("--mode", required=True, choices=["arp", "arp+dns", "arp+ssl", "arp+dns+ssl"], help="Select which components to run")
+    p.add_argument("--mode", required=True, choices=["arp", "arp+dns", "arp+ssl"], help="Select which components to run")
 
     # Parse only --mode first
     args, remaining = p.parse_known_args()
 
     parser = argparse.ArgumentParser(description="Launch Script")
-    parser.add_argument("--mode", required=True, choices=["arp", "arp+dns", "arp+ssl", "arp+dns+ssl"], help="Select which components to run")
+    parser.add_argument("--mode", required=True, choices=["arp", "arp+dns", "arp+ssl"], help="Select which components to run")
 
     # ARP Poisoning arguments
     if "arp" in args.mode:
@@ -22,7 +22,7 @@ def parse_args():
     # DNS Spoofing arguments
     if "dns" in args.mode:
         parser.add_argument("--target-url", default="bing.com", help="Target host URL to spoof")
-        parser.add_argument("--attacker-ip", default="192.168.2.254", help="IP address to redirect the target to")
+        parser.add_argument("--attacker-ip", default="192.168.2.13", help="IP address to redirect the target to")
         parser.add_argument("--queue-num", type=int, default=0, help="Netfilter Queue number")
 
     # SSL Stripping has no arguments
